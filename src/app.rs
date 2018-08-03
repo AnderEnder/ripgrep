@@ -2,8 +2,8 @@
 // including some light validation.
 //
 // This module is purposely written in a bare-bones way, since it is included
-// in ripgrep's build.rs file as a way to generate completion files for common
-// shells.
+// in ripgrep's build.rs file as a way to generate a man page and completion
+// files for common shells.
 //
 // The only other place that ripgrep deals with clap is in src/args.rs, which
 // is where we read clap's configuration from the end user's arguments and turn
@@ -478,7 +478,7 @@ impl RGArg {
     }
 }
 
-// We add an extra space to long descriptions so that a black line is inserted
+// We add an extra space to long descriptions so that a blank line is inserted
 // between flag descriptions in --help output.
 macro_rules! long {
     ($lit:expr) => { concat!($lit, " ") }
@@ -502,6 +502,7 @@ pub fn all_args_and_flags() -> Vec<RGArg> {
     flag_context_separator(&mut args);
     flag_count(&mut args);
     flag_count_matches(&mut args);
+    flag_crlf(&mut args);
     flag_debug(&mut args);
     flag_dfa_size_limit(&mut args);
     flag_encoding(&mut args);
@@ -518,6 +519,7 @@ pub fn all_args_and_flags() -> Vec<RGArg> {
     flag_ignore_case(&mut args);
     flag_ignore_file(&mut args);
     flag_invert_match(&mut args);
+    flag_json(&mut args);
     flag_line_number(&mut args);
     flag_line_regexp(&mut args);
     flag_max_columns(&mut args);
@@ -525,6 +527,8 @@ pub fn all_args_and_flags() -> Vec<RGArg> {
     flag_max_depth(&mut args);
     flag_max_filesize(&mut args);
     flag_mmap(&mut args);
+    flag_multiline(&mut args);
+    flag_multiline_dotall(&mut args);
     flag_no_config(&mut args);
     flag_no_ignore(&mut args);
     flag_no_ignore_global(&mut args);
@@ -548,6 +552,7 @@ pub fn all_args_and_flags() -> Vec<RGArg> {
     flag_stats(&mut args);
     flag_text(&mut args);
     flag_threads(&mut args);
+    flag_trim(&mut args);
     flag_type(&mut args);
     flag_type_add(&mut args);
     flag_type_clear(&mut args);
@@ -809,13 +814,51 @@ This overrides the --count flag. Note that when --count is combined with
     args.push(arg);
 }
 
+fn flag_crlf(args: &mut Vec<RGArg>) {
+    const SHORT: &str = "Support CRLF line terminators (useful on Windows).";
+    const LONG: &str = long!("\
+When enabled, ripgrep will treat CRLF ('\\r\\n') as a line terminator instead
+of just '\\n'.
+
+Principally, this permits '$' in regex patterns to match just before CRLF
+instead of just before LF. The underlying regex engine may not support this
+natively, so ripgrep will translate all instances of '$' to '(?:\\r??$)'. This
+may produce slightly different than desired match offsets. It is intended as a
+work-around until the regex engine supports this natively.
+
+CRLF support can be disabled with --no-crlf.
+");
+    let arg = RGArg::switch("crlf")
+        .help(SHORT).long_help(LONG)
+        .overrides("no-crlf");
+    args.push(arg);
+
+    let arg = RGArg::switch("no-crlf")
+        .hidden()
+        .overrides("crlf");
+    args.push(arg);
+}
+
 fn flag_debug(args: &mut Vec<RGArg>) {
     const SHORT: &str = "Show debug messages.";
     const LONG: &str = long!("\
 Show debug messages. Please use this when filing a bug report.
+
+The --debug flag is generally useful for figuring out why ripgrep skipped
+searching a particular file. The debug messages should mention all files
+skipped and why they were skipped.
+
+To get even more debug output, use the --trace flag, which implies --debug
+along with additional trace data. With --trace, the output could be quite
+large and is generally more useful for development.
 ");
     let arg = RGArg::switch("debug")
         .help(SHORT).long_help(LONG);
+    args.push(arg);
+
+    let arg = RGArg::switch("trace")
+        .hidden()
+        .overrides("debug");
     args.push(arg);
 }
 
@@ -1071,6 +1114,63 @@ Invert matching. Show lines that do not match the given patterns.
     args.push(arg);
 }
 
+fn flag_json(args: &mut Vec<RGArg>) {
+    const SHORT: &str = "Show search results in a JSON Lines format.";
+    const LONG: &str = long!("\
+Enable printing results in a JSON Lines format.
+
+When this flag is provided, ripgrep will emit a sequence of messages, each
+encoded as a JSON object, where there are five different message types:
+
+**begin** - A message that indicates a file is being searched and contains at
+least one match.
+
+**end** - A message the indicates a file is done being searched. This message
+also include summary statistics about the search for a particular file.
+
+**match** - A message that indicates a match was found. This includes the text
+and offsets of the match.
+
+**context** - A message that indicates a contextual line was found. This
+includes the text of the line, along with any match information if the search
+was inverted.
+
+**summary** - The final message emitted by ripgrep that contains summary
+statistics about the search across all files.
+
+Since file paths or the contents of files are not guaranteed to be valid UTF-8
+and JSON itself must be valid UTF-8, ripgrep will emit all data elements as
+objects with one of two keys: 'text' or 'bytes'. 'text' is a normal JSON string
+the data is valid UTF-8 while 'bytes' is the base64 encoded contents of the
+bytes.
+
+The JSON Lines format is only supported for showing search results. It cannot
+be used with other flags that emit other types of output, such as --files,
+--files-with-matches, --files-without-match, --count or --count-matches.
+ripgrep will report an error if any of the aforementioned flags are used in
+concert with --json.
+
+Other flags that control aspects of the standard output such as
+--only-matching, --heading, --replace, --max-columns, etc., have no effect
+when --json is set.
+
+The JSON Lines format can be disabled with --no-json.
+");
+    let arg = RGArg::switch("json")
+        .help(SHORT).long_help(LONG)
+        .overrides("no-json")
+        .conflicts(&[
+            "count", "count-matches",
+            "files", "files-with-matches", "files-without-match",
+        ]);
+    args.push(arg);
+
+    let arg = RGArg::switch("no-json")
+        .hidden()
+        .overrides("json");
+    args.push(arg);
+}
+
 fn flag_line_number(args: &mut Vec<RGArg>) {
     const SHORT: &str = "Show line numbers.";
     const LONG: &str = long!("\
@@ -1195,6 +1295,48 @@ This flag overrides --mmap.
     let arg = RGArg::switch("no-mmap")
         .help(NO_SHORT).long_help(NO_LONG)
         .overrides("mmap");
+    args.push(arg);
+}
+
+fn flag_multiline(args: &mut Vec<RGArg>) {
+    const SHORT: &str = "Enable matching across multiple lines.";
+    const LONG: &str = long!("\
+Enable matching across multiple lines.
+
+This flag can be disabled with --no-multiline.
+");
+    let arg = RGArg::switch("multiline").short("U")
+        .help(SHORT).long_help(LONG)
+        .overrides("no-multiline");
+    args.push(arg);
+
+    let arg = RGArg::switch("no-multiline")
+        .hidden()
+        .overrides("multiline");
+    args.push(arg);
+}
+
+fn flag_multiline_dotall(args: &mut Vec<RGArg>) {
+    const SHORT: &str = "Make '.' match new lines when multiline is enabled.";
+    const LONG: &str = long!("\
+This flag causes '.' to match new lines when multiline searching is enabled.
+This flag has no effect if multiline searching isn't enabled.
+
+Normally, a '.' will match any character except for newlines. While this
+behavior typically isn't relevant for line oriented matching (since matches
+can span at most one line), this can be useful when searching with the
+-U/--multiline flag.
+
+This flag can be disabled with --no-multiline-dotall.
+");
+    let arg = RGArg::switch("multiline-dotall")
+        .help(SHORT).long_help(LONG)
+        .overrides("no-multiline-dotall");
+    args.push(arg);
+
+    let arg = RGArg::switch("no-multiline-dotall")
+        .hidden()
+        .overrides("multiline-dotall");
     args.push(arg);
 }
 
@@ -1374,13 +1516,10 @@ the empty string. For example, if you are searching using 'rg foo' then using
 'rg \"^|foo\"' instead will emit every line in every file searched, but only
 occurrences of 'foo' will be highlighted. This flag enables the same behavior
 without needing to modify the pattern.
-
-This flag conflicts with the --only-matching and --replace flags.
 ");
     let arg = RGArg::switch("passthru")
         .help(SHORT).long_help(LONG)
-        .alias("passthrough")
-        .conflicts(&["only-matching", "replace"]);
+        .alias("passthrough");
     args.push(arg);
 }
 
@@ -1592,11 +1731,18 @@ searched, and the time taken for the entire search to complete.
 This set of aggregate statistics may expand over time.
 
 Note that this flag has no effect if --files, --files-with-matches or
---files-without-match is passed.");
+--files-without-match is passed.
 
+This flag can be disabled with --no-stats.
+");
     let arg = RGArg::switch("stats")
-        .help(SHORT).long_help(LONG);
+        .help(SHORT).long_help(LONG)
+        .overrides("no-stats");
+    args.push(arg);
 
+    let arg = RGArg::switch("no-stats")
+        .hidden()
+        .overrides("stats");
     args.push(arg);
 }
 
@@ -1636,6 +1782,25 @@ causes ripgrep to choose the thread count using heuristics.
 ");
     let arg = RGArg::flag("threads", "NUM").short("j")
         .help(SHORT).long_help(LONG);
+    args.push(arg);
+}
+
+fn flag_trim(args: &mut Vec<RGArg>) {
+    const SHORT: &str = "Trim prefixed whitespace from matches.";
+    const LONG: &str = long!("\
+When set, all ASCII whitespace at the beginning of each line printed will be
+trimmed.
+
+This flag can be disabled with --no-trim.
+");
+    let arg = RGArg::switch("trim")
+        .help(SHORT).long_help(LONG)
+        .overrides("no-trim");
+    args.push(arg);
+
+    let arg = RGArg::switch("no-trim")
+        .hidden()
+        .overrides("trim");
     args.push(arg);
 }
 
